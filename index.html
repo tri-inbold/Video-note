@@ -1,0 +1,218 @@
+document.addEventListener('DOMContentLoaded', () => {
+    // Lấy các element cần thiết
+    const videoPlayer = document.getElementById('video-player');
+    const canvas = document.getElementById('drawing-canvas');
+    const ctx = canvas.getContext('2d');
+    
+    const videoLoader = document.getElementById('video-loader');
+    const notesLoader = document.getElementById('notes-loader');
+    const saveNotesBtn = document.getElementById('save-notes-btn');
+    const notesList = document.getElementById('notes-list');
+    const toolBtns = document.querySelectorAll('.tool-btn');
+
+    // Biến trạng thái
+    let notes = [];
+    let currentTool = 'comment';
+    let isDrawing = false;
+    let startX, startY;
+    let videoFileName = 'unnamed_video';
+
+    //--- CÁC HÀM XỬ LÝ ---//
+    
+    // 1. Tải và hiển thị video
+    videoLoader.addEventListener('change', (e) => {
+        const file = e.target.files[0];
+        if (file) {
+            const fileURL = URL.createObjectURL(file);
+            videoPlayer.src = fileURL;
+            videoFileName = file.name.split('.').slice(0, -1).join('.'); // Lấy tên file không bao gồm đuôi
+        }
+    });
+
+    // Đồng bộ kích thước canvas với video khi video được tải
+    videoPlayer.addEventListener('loadedmetadata', () => {
+        canvas.width = videoPlayer.videoWidth;
+        canvas.height = videoPlayer.videoHeight;
+    });
+
+    // 2. Chọn công cụ
+    toolBtns.forEach(btn => {
+        btn.addEventListener('click', () => {
+            toolBtns.forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            currentTool = btn.dataset.tool;
+        });
+    });
+
+    // 3. Logic vẽ trên Canvas
+    canvas.addEventListener('mousedown', (e) => {
+        if (!videoPlayer.src) return;
+        isDrawing = true;
+        [startX, startY] = [e.offsetX, e.offsetY];
+        
+        // Nếu là comment, hỏi ngay nội dung
+        if (currentTool === 'comment') {
+            const text = prompt("Nhập nội dung comment:");
+            if (text) {
+                const note = {
+                    time: videoPlayer.currentTime,
+                    type: 'comment',
+                    x1: startX, y1: startY, x2: 0, y2: 0,
+                    text: text
+                };
+                notes.push(note);
+                redrawAllNotes();
+                updateNotesList();
+            }
+            isDrawing = false;
+        }
+    });
+
+    canvas.addEventListener('mousemove', (e) => {
+        if (!isDrawing) return;
+        redrawAllNotes(); // Vẽ lại tất cả các note cũ
+        const [currentX, currentY] = [e.offsetX, e.offsetY];
+        // Vẽ preview hình đang tạo
+        drawShape(currentTool, startX, startY, currentX, currentY, 'red');
+    });
+
+    canvas.addEventListener('mouseup', (e) => {
+        if (!isDrawing) return;
+        isDrawing = false;
+        const [endX, endY] = [e.offsetX, e.offsetY];
+
+        const note = {
+            time: videoPlayer.currentTime,
+            type: currentTool,
+            x1: startX, y1: startY,
+            x2: endX, y2: endY,
+            text: ''
+        };
+        notes.push(note);
+        redrawAllNotes();
+        updateNotesList();
+    });
+
+    // 4. Các hàm vẽ hình cụ thể
+    function drawShape(type, x1, y1, x2, y2, color = 'yellow', text = '') {
+        ctx.strokeStyle = color;
+        ctx.fillStyle = color;
+        ctx.lineWidth = 2;
+        ctx.font = '16px Arial';
+
+        switch(type) {
+            case 'comment':
+                ctx.fillText(`📝 ${text}`, x1, y1);
+                break;
+            case 'square':
+                ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
+                break;
+            case 'circle':
+                const radius = Math.sqrt(Math.pow(x2 - x1, 2) + Math.pow(y2 - y1, 2));
+                ctx.beginPath();
+                ctx.arc(x1, y1, radius, 0, 2 * Math.PI);
+                ctx.stroke();
+                break;
+            case 'line':
+                ctx.beginPath();
+                ctx.moveTo(x1, y1);
+                ctx.lineTo(x2, y2);
+                ctx.stroke();
+                break;
+            case 'arrow':
+                drawArrow(x1, y1, x2, y2);
+                break;
+        }
+    }
+    
+    function drawArrow(x1, y1, x2, y2){
+        ctx.beginPath();
+        const headlen = 10;
+        const dx = x2 - x1;
+        const dy = y2 - y1;
+        const angle = Math.atan2(dy, dx);
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x2, y2);
+        ctx.lineTo(x2 - headlen * Math.cos(angle - Math.PI / 6), y2 - headlen * Math.sin(angle - Math.PI / 6));
+        ctx.moveTo(x2, y2);
+        ctx.lineTo(x2 - headlen * Math.cos(angle + Math.PI / 6), y2 - headlen * Math.sin(angle + Math.PI / 6));
+        ctx.stroke();
+    }
+    
+    // 5. Hàm vẽ lại tất cả các notes lên canvas
+    function redrawAllNotes() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        notes.forEach(note => {
+            drawShape(note.type, note.x1, note.y1, note.x2, note.y2, 'yellow', note.text);
+        });
+    }
+
+    // 6. Cập nhật danh sách ghi chú UI
+    function updateNotesList() {
+        notesList.innerHTML = '';
+        notes.sort((a,b) => a.time - b.time); // Sắp xếp theo thời gian
+        notes.forEach((note, index) => {
+            const li = document.createElement('li');
+            const noteText = note.type === 'comment' ? note.text : note.type;
+            li.textContent = `[${note.time.toFixed(2)}s] - ${noteText}`;
+            li.addEventListener('click', () => {
+                videoPlayer.currentTime = note.time;
+                videoPlayer.pause();
+            });
+            notesList.appendChild(li);
+        });
+    }
+
+    // 7. Lưu ghi chú ra file .txt
+    saveNotesBtn.addEventListener('click', () => {
+        if (notes.length === 0) {
+            alert("Không có ghi chú nào để lưu.");
+            return;
+        }
+        let content = "time|type|x1|y1|x2|y2|text\n";
+        notes.forEach(note => {
+            content += `${note.time}|${note.type}|${note.x1}|${note.y1}|${note.x2}|${note.y2}|${note.text}\n`;
+        });
+        
+        const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = `${videoFileName}_QC.txt`;
+        a.click();
+        URL.revokeObjectURL(a.href);
+    });
+
+    // 8. Tải ghi chú từ file .txt
+    notesLoader.addEventListener('change', (e) => {
+        const file = e.target.files[0];
+        if (file) {
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                const content = event.target.result;
+                const lines = content.split('\n').filter(line => line.trim() !== '');
+                
+                if(lines.length <= 1) return; // Chỉ có header hoặc rỗng
+                
+                notes = []; // Xóa notes cũ
+                // Bỏ qua header (dòng đầu tiên)
+                for (let i = 1; i < lines.length; i++) {
+                    const parts = lines[i].split('|');
+                    if (parts.length >= 7) {
+                        const note = {
+                            time: parseFloat(parts[0]),
+                            type: parts[1],
+                            x1: parseInt(parts[2]), y1: parseInt(parts[3]),
+                            x2: parseInt(parts[4]), y2: parseInt(parts[5]),
+                            text: parts[6]
+                        };
+                        notes.push(note);
+                    }
+                }
+                redrawAllNotes();
+                updateNotesList();
+            };
+            reader.readAsText(file);
+        }
+    });
+
+});
